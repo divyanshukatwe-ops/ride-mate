@@ -1,0 +1,100 @@
+# 🚗 Rade Mate - Project Documentation
+
+## Team Information
+
+**Team Name:** Innovix  
+**Team ID:** CX021
+
+### Team Members
+- Divyanshu Katwe
+- Nayan Gokhale
+- Najuka Shendre
+- Ritika Shinde
+
+---
+
+# Project Overview
+
+Rade Mate is a smart ride-sharing web application developed for college students. It allows students traveling on similar routes at similar times to share auto or cab rides, reducing travel expenses and making daily commuting more convenient.
+
+---
+
+# Problem Statement
+
+College students often travel individually using autos and cabs, even when multiple students are heading to the same destination. This results in higher transportation costs and unnecessary vehicle usage.
+
+Rade Mate solves this problem by connecting students with similar routes, allowing them to share rides and automatically split the fare.
+
+---
+
+# Objectives
+
+- Reduce transportation costs.
+- Enable easy ride sharing among students.
+- Match students traveling on similar routes.
+- Automatically calculate fare sharing.
+- Provide a simple and responsive user experience.
+
+---
+
+# Tech Stack
+
+### Frontend
+- React.js (Vite)
+- Tailwind CSS
+- React Router
+- Axios
+
+### Backend
+- FastAPI (Python)
+- Uvicorn
+- Pydantic
+
+### Data Storage
+- In-memory Python lists and dictionaries (No Database)
+
+---
+
+# Key Features
+
+- Create a Ride
+- Browse Available Rides
+- Smart Route Matching
+- Join Ride
+- Automatic Fare Splitting
+- Dynamic UI Updates
+- Responsive Design
+- Input Validation
+- Error Handling
+
+---
+
+# Workflow
+
+1. Student creates a ride.
+2. Ride is listed for other students.
+3. Students search for matching rides.
+4. Student joins a ride.
+5. Seats are updated automatically.
+6. Fare is divided equally among passengers.
+
+---
+
+# Future Scope
+
+- Google Maps Integration
+- Live Location Tracking
+- Chat Between Passengers
+- Ratings & Reviews
+- Push Notifications
+- AI-Based Route Recommendation
+
+---
+
+# Conclusion
+
+Rade Mate provides an efficient and affordable transportation solution for college students by enabling ride sharing. It promotes cost savings, better resource utilization, and a smarter commuting experience through a simple and user-friendly web application.
+
+---
+
+**Developed by Team Innovix for CODEX Hackfest 2026**
