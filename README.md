@@ -1,4 +1,4 @@
-# 🚗 Rade Mate – College Auto & Cab Pooling
+#  Ride Mate – College Auto & Cab Pooling
 
 **Team ID:** CX021  
 **Team Name:** Innovix
@@ -18,7 +18,7 @@
 
 Many college students travel to and from college every day using autos or cabs. Often, multiple students are heading to the same destination at similar times but are unaware of each other. As a result, they book separate rides, increasing travel expenses and causing unnecessary vehicle usage.
 
-**Rade Mate** solves this problem by allowing students to create rides, discover other students traveling on the same route, request to join rides, and automatically split the fare. This makes commuting more affordable, convenient, and environmentally friendly.
+**Ride Mate** solves this problem by allowing students to create rides, discover other students traveling on the same route, request to join rides, and automatically split the fare. This makes commuting more affordable, convenient, and environmentally friendly.
 
 ---
 
