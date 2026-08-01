@@ -1,0 +1,1928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RideMate – College Auto & Cab Pooling</title>
+  <meta name="description" content="Instant, smart auto & cab pooling for college students. Save money, split fares effortlessly, and ride safe.">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#f0fdf4', 100: '#dcfce7', 500: '#10b981', 600: '#059669', 700: '#047857' },
+            accent: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#0284c7', 600: '#0369a1', 700: '#075985' }
+          },
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'Inter', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet OpenStreetMap CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- React & Babel Standalone -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Axios -->
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.1) 0%, transparent 40%),
+                  radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 40%),
+                  #090d16;
+      background-attachment: fixed;
+      color: #f1f5f9;
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-nav {
+      background: rgba(9, 13, 22, 0.88);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .text-gradient-emerald {
+      background: linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .text-gradient-sky {
+      background: linear-gradient(135deg, #38bdf8 0%, #0284c7 50%, #0369a1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #map { height: 320px; width: 100%; border-radius: 1rem; z-index: 10; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #10b981; }
+  </style>
+</head>
+<body class="font-sans antialiased selection:bg-emerald-500 selection:text-white min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const locationCoords = {
+      "college": [21.1245, 79.0520],
+      "sitabuldi": [21.1458, 79.0882],
+      "airport": [21.0922, 79.0617],
+      "dharampeth": [21.1410, 79.0620],
+      "sadar": [21.1610, 79.0800],
+      "medical": [21.1300, 79.0950],
+      "it park": [21.1180, 79.0480],
+      "futala": [21.1530, 79.0440],
+      "railway": [21.1520, 79.0880]
+    };
+
+    const getCoordsForLocation = (name, fallbackLat = 21.1245, fallbackLng = 79.0520) => {
+      if (!name) return [fallbackLat, fallbackLng];
+      const lower = name.lowerCase || name.toLowerCase();
+      for (const key in locationCoords) {
+        if (lower.includes(key)) return locationCoords[key];
+      }
+      return [fallbackLat + (Math.random() * 0.02 - 0.01), fallbackLng + (Math.random() * 0.02 - 0.01)];
+    };
+
+    const defaultProfile = {
+      name: "Aarav Sharma",
+      rollNo: "STU-2026-8842",
+      email: "aarav.sharma@college.edu",
+      phone: "+91 98230 44921",
+      department: "Computer Science & Eng. (4th Year)",
+      preferredGate: "College Gate 1 (Main Gate)",
+      emergencyContactName: "Rajesh Sharma (Father)",
+      emergencyContactPhone: "+91 94221 00982",
+      autoCabPref: "Any",
+      whatsappNotify: true,
+      sosBroadcasting: true,
+      fareSplitAlerts: true
+    };
+
+    // Persistence Helpers
+    const getStoredUser = () => {
+      try { 
+        const stored = localStorage.getItem('ridemate_logged_user');
+        return stored ? JSON.parse(stored) : defaultProfile; 
+      } catch { 
+        return defaultProfile; 
+      }
+    };
+    const saveUser = (user) => {
+      localStorage.setItem('ridemate_logged_user', JSON.stringify(user));
+    };
+    const removeUser = () => {
+      localStorage.removeItem('ridemate_logged_user');
+    };
+
+    const getStoredJoinedRides = () => {
+      try { return JSON.parse(localStorage.getItem('ridemate_joined_rides') || '[]'); } catch { return []; }
+    };
+    const saveJoinedRide = (id) => {
+      const current = getStoredJoinedRides();
+      if (!current.includes(id)) {
+        localStorage.setItem('ridemate_joined_rides', JSON.stringify([...current, id]));
+      }
+    };
+    const removeJoinedRide = (id) => {
+      const next = getStoredJoinedRides().filter(rId => rId !== id);
+      localStorage.setItem('ridemate_joined_rides', JSON.stringify(next));
+    };
+
+    const getStoredOfferedRides = () => {
+      try { return JSON.parse(localStorage.getItem('ridemate_offered_rides') || '[]'); } catch { return []; }
+    };
+    const saveOfferedRide = (id) => {
+      const current = getStoredOfferedRides();
+      if (!current.includes(id)) {
+        localStorage.setItem('ridemate_offered_rides', JSON.stringify([...current, id]));
+      }
+    };
+
+    // API client
+    const api = {
+      getRides: async (params = {}) => {
+        const res = await axios.get('/api/rides', { params });
+        return res.data;
+      },
+      getStats: async () => {
+        const res = await axios.get('/api/rides/stats');
+        return res.data;
+      },
+      createRide: async (payload) => {
+        const res = await axios.post('/api/rides', payload);
+        return res.data;
+      },
+      joinRide: async (rideId, passengerName = "Student Companion") => {
+        const res = await axios.post(`/api/rides/${rideId}/join`, { passenger_name: passengerName });
+        return res.data;
+      },
+      leaveRide: async (rideId) => {
+        const res = await axios.post(`/api/rides/${rideId}/leave`);
+        return res.data;
+      }
+    };
+
+    // Main App Component
+    function App() {
+      const [currentView, setCurrentView] = useState('landing');
+      const [rides, setRides] = useState([]);
+      const [stats, setStats] = useState({ total_rides: 0, active_rides: 0, total_available_seats: 0, total_estimated_savings: 0 });
+      const [loading, setLoading] = useState(true);
+      const [toast, setToast] = useState(null);
+      const [selectedJoinRide, setSelectedJoinRide] = useState(null);
+      const [selectedTrackingRide, setSelectedTrackingRide] = useState(null);
+      const [showSafetyModal, setShowSafetyModal] = useState(false);
+      const [showLoginModal, setShowLoginModal] = useState(false);
+
+      const [currentUser, setCurrentUser] = useState(getStoredUser());
+      const [joinedRideIds, setJoinedRideIds] = useState(getStoredJoinedRides());
+      const [offeredRideIds, setOfferedRideIds] = useState(getStoredOfferedRides());
+
+      const [filters, setFilters] = useState({ pickup: '', destination: '', date: '', vehicle_type: 'All' });
+
+      const showToast = (message, type = 'info') => {
+        setToast({ message, type, id: Date.now() });
+        setTimeout(() => setToast(null), 4000);
+      };
+
+      const handleLoginSuccess = (userData) => {
+        const fullUser = { ...defaultProfile, ...userData };
+        saveUser(fullUser);
+        setCurrentUser(fullUser);
+        setShowLoginModal(false);
+        showToast(`Welcome back, ${fullUser.name}! Logged in successfully.`, 'success');
+      };
+
+      const handleProfileUpdate = (updatedProfile) => {
+        saveUser(updatedProfile);
+        setCurrentUser(updatedProfile);
+        showToast('Profile updated successfully!', 'success');
+      };
+
+      const handleLogout = () => {
+        removeUser();
+        setCurrentUser(null);
+        showToast('Logged out successfully.', 'info');
+      };
+
+      const fetchData = useCallback(async (customFilters = filters) => {
+        setLoading(true);
+        try {
+          const cleanParams = {};
+          if (customFilters.pickup) cleanParams.pickup = customFilters.pickup;
+          if (customFilters.destination) cleanParams.destination = customFilters.destination;
+          if (customFilters.date) cleanParams.date = customFilters.date;
+          if (customFilters.vehicle_type && customFilters.vehicle_type !== 'All') {
+            cleanParams.vehicle_type = customFilters.vehicle_type;
+          }
+
+          const [ridesData, statsData] = await Promise.all([
+            api.getRides(cleanParams),
+            api.getStats()
+          ]);
+
+          setRides(ridesData);
+          setStats(statsData);
+        } catch (err) {
+          showToast(err.message || 'Failed to sync with server', 'error');
+        } finally {
+          setLoading(false);
+        }
+      }, [filters]);
+
+      useEffect(() => {
+        fetchData();
+      }, [fetchData]);
+
+      const handleJoinRide = async (rideId, passengerName) => {
+        const targetRide = rides.find(r => r.id === rideId);
+        if (!targetRide || targetRide.available_seats <= 0) {
+          showToast('No Seats Available for this ride!', 'error');
+          return;
+        }
+
+        const nameToUse = passengerName || (currentUser ? currentUser.name : "Student Companion");
+
+        setRides(prev => prev.map(ride => {
+          if (ride.id === rideId) {
+            const newAvail = Math.max(0, ride.available_seats - 1);
+            const newJoined = (ride.joined_passengers || 1) + 1;
+            const newFare = Math.round(ride.total_fare / newJoined);
+            return {
+              ...ride,
+              available_seats: newAvail,
+              joined_passengers: newJoined,
+              fare_per_person: newFare,
+              status: newAvail === 0 ? 'Full' : 'Active'
+            };
+          }
+          return ride;
+        }));
+
+        saveJoinedRide(rideId);
+        setJoinedRideIds(getStoredJoinedRides());
+
+        showToast('Successfully booked seat! Check My Rides.', 'success');
+        setSelectedJoinRide(null);
+
+        try {
+          const res = await api.joinRide(rideId, nameToUse);
+          showToast(res.message, 'success');
+          const newStats = await api.getStats();
+          setStats(newStats);
+        } catch (err) {
+          fetchData();
+          showToast(err.message || 'Could not join ride', 'error');
+        }
+      };
+
+      const handleLeaveRide = async (rideId) => {
+        try {
+          await api.leaveRide(rideId);
+          removeJoinedRide(rideId);
+          setJoinedRideIds(getStoredJoinedRides());
+          showToast('Left ride successfully.', 'info');
+          fetchData();
+        } catch (err) {
+          showToast(err.message || 'Failed to leave ride', 'error');
+        }
+      };
+
+      const handleCreateRide = async (payload) => {
+        try {
+          const created = await api.createRide(payload);
+          saveOfferedRide(created.id);
+          setOfferedRideIds(getStoredOfferedRides());
+          showToast('Ride posted successfully!', 'success');
+          await fetchData();
+          setCurrentView('myrides');
+        } catch (err) {
+          showToast(err.message || 'Failed to create ride', 'error');
+          throw err;
+        }
+      };
+
+      const resetFilters = () => {
+        const defaultF = { pickup: '', destination: '', date: '', vehicle_type: 'All' };
+        setFilters(defaultF);
+        fetchData(defaultF);
+      };
+
+      const myTotalCount = joinedRideIds.length + offeredRideIds.length;
+
+      return (
+        <div className="flex flex-col min-h-screen">
+          {/* Header Navbar - Decluttered Multi-page Navigation */}
+          <nav className="sticky top-0 z-40 glass-nav shadow-lg">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-20">
+                
+                {/* Logo */}
+                <div onClick={() => setCurrentView('landing')} className="flex items-center gap-3 cursor-pointer group">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-sky-500 p-0.5 shadow-lg group-hover:scale-105 transition-transform">
+                    <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center font-bold text-emerald-400 text-lg">
+                      🛺
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xl font-extrabold text-white">Ride<span className="text-gradient-emerald">Mate</span></span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
+                        Campus
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-medium">College Auto & Cab Pooling</p>
+                  </div>
+                </div>
+
+                {/* Clean Multi-Page Nav Links */}
+                <div className="hidden lg:flex items-center gap-1.5 bg-slate-900/60 p-1.5 rounded-2xl border border-slate-800">
+                  <button 
+                    onClick={() => setCurrentView('landing')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      currentView === 'landing' ? 'bg-emerald-500 text-slate-950 shadow-md' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    🏡 Home
+                  </button>
+                  <button 
+                    onClick={() => setCurrentView('browse')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      currentView === 'browse' ? 'bg-emerald-500 text-slate-950 shadow-md' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    🔍 Browse Rides
+                  </button>
+                  <button 
+                    onClick={() => setCurrentView('dashboard')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      currentView === 'dashboard' ? 'bg-emerald-500 text-slate-950 shadow-md' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    📊 Dashboard
+                  </button>
+                  <button 
+                    onClick={() => setCurrentView('myrides')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                      currentView === 'myrides' ? 'bg-emerald-500 text-slate-950 shadow-md' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    🎫 My Rides
+                    {myTotalCount > 0 && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-extrabold bg-slate-950 text-emerald-400 rounded-full">
+                        {myTotalCount}
+                      </span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setCurrentView('profile')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      currentView === 'profile' ? 'bg-emerald-500 text-slate-950 shadow-md' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    👤 Profile
+                  </button>
+                </div>
+
+                {/* Right Action Buttons */}
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <button 
+                    onClick={() => setShowSafetyModal(true)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 transition-all shadow-rose-950/50"
+                  >
+                    🚨 SOS & Safety
+                  </button>
+
+                  {/* USER LOGIN / PROFILE BUTTON */}
+                  {currentUser ? (
+                    <div className="hidden sm:flex items-center gap-2 bg-slate-900 border border-emerald-500/40 pl-3 pr-1 py-1 rounded-xl">
+                      <span onClick={() => setCurrentView('profile')} className="text-xs font-bold text-emerald-400 cursor-pointer flex items-center gap-1 hover:underline">
+                        👤 {currentUser.name.split(' ')[0]}
+                      </span>
+                      <button 
+                        onClick={handleLogout}
+                        className="px-2.5 py-1 text-[10px] font-bold bg-slate-800 text-slate-400 hover:text-white rounded-lg hover:bg-rose-500/20 hover:text-rose-300 transition-all"
+                        title="Logout"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setShowLoginModal(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-800 text-emerald-400 border border-emerald-500/40 hover:bg-slate-700 transition-all"
+                    >
+                      🔑 Login
+                    </button>
+                  )}
+
+                  <button 
+                    onClick={() => setCurrentView('create')}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-emerald-glow hover:brightness-110"
+                  >
+                    + Offer Ride
+                  </button>
+                </div>
+              </div>
+            </div>
+          </nav>
+
+          {/* Main Body View Container */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {currentView === 'landing' && (
+              <LandingView rides={rides} setCurrentView={setCurrentView} onJoinClick={setSelectedJoinRide} onTrackClick={setSelectedTrackingRide} onSafetyClick={() => setShowSafetyModal(true)} onLoginClick={() => setShowLoginModal(true)} currentUser={currentUser} />
+            )}
+
+            {currentView === 'dashboard' && (
+              <DashboardView stats={stats} rides={rides} loading={loading} setCurrentView={setCurrentView} onJoinClick={setSelectedJoinRide} onTrackClick={setSelectedTrackingRide} onSafetyClick={() => setShowSafetyModal(true)} currentUser={currentUser} />
+            )}
+
+            {currentView === 'browse' && (
+              <BrowseView 
+                rides={rides} 
+                loading={loading} 
+                filters={filters} 
+                setFilters={setFilters} 
+                onSearch={() => fetchData()} 
+                onReset={resetFilters} 
+                onJoinClick={setSelectedJoinRide} 
+                onTrackClick={setSelectedTrackingRide}
+                joinedRideIds={joinedRideIds}
+              />
+            )}
+
+            {currentView === 'myrides' && (
+              <MyRidesView 
+                rides={rides} 
+                joinedRideIds={joinedRideIds} 
+                offeredRideIds={offeredRideIds} 
+                onLeaveRide={handleLeaveRide}
+                onTrackClick={setSelectedTrackingRide}
+                onSafetyClick={() => setShowSafetyModal(true)}
+                setCurrentView={setCurrentView}
+              />
+            )}
+
+            {currentView === 'profile' && (
+              <ProfileView user={currentUser} onUpdateProfile={handleProfileUpdate} showToast={showToast} />
+            )}
+
+            {currentView === 'create' && (
+              <CreateView onCreate={handleCreateRide} showToast={showToast} currentUser={currentUser} />
+            )}
+          </main>
+
+          {/* Footer */}
+          <footer className="border-t border-slate-800 bg-slate-950/80 backdrop-blur-xl mt-12 py-8 text-slate-400 text-xs">
+            <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div>
+                <p className="text-slate-200 font-bold">RideMate – College Auto & Cab Pooling Hackathon Prototype</p>
+                <p className="text-slate-500">24/7 Campus Security Control Room & Customer Support Enabled</p>
+              </div>
+              <div className="flex items-center gap-4 text-xs">
+                <button onClick={() => setShowSafetyModal(true)} className="text-rose-400 hover:underline font-bold">
+                  🚨 Emergency Contacts (112 / Campus Security)
+                </button>
+                <button onClick={() => setShowSafetyModal(true)} className="text-sky-400 hover:underline font-bold">
+                  📞 24/7 Customer Care Helpline
+                </button>
+              </div>
+            </div>
+          </footer>
+
+          {/* Toast Notification */}
+          {toast && (
+            <div className="fixed bottom-6 right-6 z-50 animate-bounce-short">
+              <div className={`px-5 py-4 rounded-2xl shadow-2xl backdrop-blur-xl border text-sm font-semibold flex items-center gap-3 ${
+                toast.type === 'success' ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-100' :
+                toast.type === 'error' ? 'bg-rose-950/90 border-rose-500/50 text-rose-100' :
+                'bg-sky-950/90 border-sky-500/50 text-sky-100'
+              }`}>
+                <span>{toast.message}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Join Confirmation Modal */}
+          {selectedJoinRide && (
+            <JoinModal ride={selectedJoinRide} onClose={() => setSelectedJoinRide(null)} onConfirm={handleJoinRide} currentUser={currentUser} />
+          )}
+
+          {/* Live Map & Driver Tracking Modal */}
+          {selectedTrackingRide && (
+            <LiveMapModal ride={selectedTrackingRide} onClose={() => setSelectedTrackingRide(null)} onSafetyClick={() => setShowSafetyModal(false)} />
+          )}
+
+          {/* Emergency Contacts & Customer Care Safety Modal */}
+          {showSafetyModal && (
+            <SafetyCenterModal onClose={() => setShowSafetyModal(false)} showToast={showToast} />
+          )}
+
+          {/* LOGIN & SIGN UP MODAL */}
+          {showLoginModal && (
+            <LoginModal onClose={() => setShowLoginModal(false)} onLoginSuccess={handleLoginSuccess} showToast={showToast} />
+          )}
+
+        </div>
+      );
+    }
+
+    // 1. Landing View
+    function LandingView({ rides, setCurrentView, onJoinClick, onTrackClick, onSafetyClick, onLoginClick, currentUser }) {
+      const topMatches = rides.slice(0, 3);
+      return (
+        <div className="space-y-16 py-4">
+          <div className="text-center max-w-4xl mx-auto space-y-6 pt-4">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 border border-emerald-500/30 text-xs font-bold text-emerald-400">
+              ✨ College Student Login & Auto/Cab Pooling Active
+            </div>
+            <h1 className="text-4xl sm:text-6xl font-extrabold text-white leading-tight">
+              Ride Together, <span className="text-gradient-emerald">Split Fares</span>, <br />
+              Save Money on <span className="text-gradient-sky">Campus Commutes</span>
+            </h1>
+            <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto">
+              Connect with college mates going to Sitabuldi, Airport, Dharampeth, or Sadar. 
+              Smart location matching, instant seat reservation, and live driver map tracking with student login.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+              <button 
+                onClick={() => setCurrentView('browse')}
+                className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-base shadow-lg hover:brightness-110"
+              >
+                Find Pooled Rides ➔
+              </button>
+
+              {!currentUser ? (
+                <button 
+                  onClick={onLoginClick}
+                  className="px-6 py-3.5 rounded-2xl glass-card text-emerald-400 border border-emerald-500/40 font-bold text-base hover:bg-slate-800"
+                >
+                  🔑 Student Login / Register
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setCurrentView('profile')}
+                  className="px-8 py-3.5 rounded-2xl glass-card text-white font-bold text-base hover:bg-slate-800"
+                >
+                  👤 View Profile
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-extrabold text-white">Top Smart Matches</h2>
+                <p className="text-xs text-slate-400">Rides departing soon with high location & time match scores</p>
+              </div>
+              <button onClick={() => setCurrentView('browse')} className="text-xs font-bold text-emerald-400 hover:underline">
+                View All ({rides.length}) ➔
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {topMatches.map(ride => (
+                <RideCard key={ride.id} ride={ride} onJoinClick={onJoinClick} onTrackClick={onTrackClick} />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Dashboard View
+    function DashboardView({ stats, rides, loading, setCurrentView, onJoinClick, onTrackClick, onSafetyClick, currentUser }) {
+      const activeRides = rides.filter(r => r.available_seats > 0);
+
+      return (
+        <div className="space-y-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">
+                {currentUser ? `Welcome, ${currentUser.name}` : 'Student'} <span className="text-gradient-emerald">Dashboard</span>
+              </h1>
+              <p className="text-xs text-slate-400">Overview of active rides, available seats, and estimated student savings</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={onSafetyClick} className="px-3.5 py-2 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold text-xs">
+                🚨 Emergency SOS
+              </button>
+              <button onClick={() => setCurrentView('myrides')} className="px-4 py-2 rounded-xl bg-slate-800 text-emerald-400 font-bold text-xs border border-emerald-500/30">
+                View My Rides
+              </button>
+              <button onClick={() => setCurrentView('profile')} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 font-bold text-xs">
+                👤 Profile
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="glass-card p-6 rounded-2xl border border-emerald-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Total Available Rides</p>
+              <h3 className="text-3xl font-extrabold text-white mt-1">{stats.total_rides || 0}</h3>
+              <p className="text-[11px] text-emerald-400 mt-2 font-medium">Sample & Live Rides</p>
+            </div>
+            <div className="glass-card p-6 rounded-2xl border border-sky-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Active Rides</p>
+              <h3 className="text-3xl font-extrabold text-sky-400 mt-1">{stats.active_rides || 0}</h3>
+              <p className="text-[11px] text-sky-400 mt-2 font-medium">Ready to Join</p>
+            </div>
+            <div className="glass-card p-6 rounded-2xl border border-amber-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Seats Available</p>
+              <h3 className="text-3xl font-extrabold text-amber-400 mt-1">{stats.total_available_seats || 0}</h3>
+              <p className="text-[11px] text-amber-400 mt-2 font-medium">Open Seats Left</p>
+            </div>
+            <div className="glass-card p-6 rounded-2xl border border-purple-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Total Estimated Savings</p>
+              <h3 className="text-3xl font-extrabold text-purple-400 mt-1">₹{stats.total_estimated_savings || 0}</h3>
+              <p className="text-[11px] text-purple-400 mt-2 font-medium">Saved by Student Poolers</p>
+            </div>
+          </div>
+
+          <div className="space-y-4 pt-4">
+            <h2 className="text-xl font-extrabold text-white">Active Campus Rides Feed</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {activeRides.map(ride => (
+                <RideCard key={ride.id} ride={ride} onJoinClick={onJoinClick} onTrackClick={onTrackClick} />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. Browse View
+    function BrowseView({ rides, loading, filters, setFilters, onSearch, onReset, onJoinClick, onTrackClick, joinedRideIds }) {
+      return (
+        <div className="space-y-8">
+          <div>
+            <h1 className="text-3xl font-extrabold text-white">Browse & <span className="text-gradient-emerald">Match Rides</span></h1>
+            <p className="text-xs text-slate-400 mt-1">Search by pickup, destination, date, or vehicle type. Best matches appear first.</p>
+          </div>
+
+          <form onSubmit={(e) => { e.preventDefault(); onSearch(); }} className="glass-card p-6 rounded-2xl space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <input
+                type="text"
+                placeholder="Pickup (e.g. College)"
+                value={filters.pickup}
+                onChange={e => setFilters({...filters, pickup: e.target.value})}
+                className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Destination (e.g. Airport)"
+                value={filters.destination}
+                onChange={e => setFilters({...filters, destination: e.target.value})}
+                className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+              />
+              <input
+                type="date"
+                value={filters.date}
+                onChange={e => setFilters({...filters, date: e.target.value})}
+                className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+              />
+              <select
+                value={filters.vehicle_type}
+                onChange={e => setFilters({...filters, vehicle_type: e.target.value})}
+                className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+              >
+                <option value="All">All Vehicles</option>
+                <option value="Auto">Auto Rickshaw</option>
+                <option value="Cab">Cab / Taxi</option>
+              </select>
+            </div>
+            <div className="flex justify-between items-center pt-2">
+              <button type="button" onClick={onReset} className="text-xs text-slate-400 hover:text-emerald-400">
+                Reset Filters
+              </button>
+              <button type="submit" className="px-6 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-sm">
+                Run Smart Match Search
+              </button>
+            </div>
+          </form>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {rides.map(ride => (
+              <RideCard 
+                key={ride.id} 
+                ride={ride} 
+                onJoinClick={onJoinClick} 
+                onTrackClick={onTrackClick}
+                isJoined={joinedRideIds.includes(ride.id)} 
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // 4. MY RIDES View
+    function MyRidesView({ rides, joinedRideIds, offeredRideIds, onLeaveRide, onTrackClick, onSafetyClick, setCurrentView }) {
+      const [activeTab, setActiveTab] = useState('joined');
+      const joinedRides = rides.filter(r => joinedRideIds.includes(r.id));
+      const offeredRides = rides.filter(r => offeredRideIds.includes(r.id));
+
+      const totalJoinedSavings = joinedRides.reduce((acc, r) => acc + (r.total_fare - r.fare_per_person), 0);
+
+      return (
+        <div className="space-y-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">My <span className="text-gradient-emerald">Upcoming Rides</span></h1>
+              <p className="text-xs text-slate-400 mt-1">Track rides you joined or posted as a host</p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={onSafetyClick} className="px-3.5 py-2 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold text-xs">
+                🚨 Emergency & Customer Care
+              </button>
+              <button onClick={() => setCurrentView('browse')} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 font-bold text-xs">
+                + Browse More Rides
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div className="glass-card p-5 rounded-2xl border border-emerald-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Joined Rides Booked</p>
+              <h3 className="text-2xl font-extrabold text-emerald-400 mt-1">{joinedRides.length}</h3>
+              <p className="text-[11px] text-slate-400 mt-1">Seats reserved by you</p>
+            </div>
+            <div className="glass-card p-5 rounded-2xl border border-sky-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Rides Offered by You</p>
+              <h3 className="text-2xl font-extrabold text-sky-400 mt-1">{offeredRides.length}</h3>
+              <p className="text-[11px] text-slate-400 mt-1">Hosted on campus</p>
+            </div>
+            <div className="glass-card p-5 rounded-2xl border border-amber-500/30">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Your Pooling Savings</p>
+              <h3 className="text-2xl font-extrabold text-amber-400 mt-1">₹{Math.round(totalJoinedSavings)}</h3>
+              <p className="text-[11px] text-slate-400 mt-1">Saved vs solo rides</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+            <button
+              onClick={() => setActiveTab('joined')}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${
+                activeTab === 'joined' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'text-slate-400'
+              }`}
+            >
+              Rides You Joined ({joinedRides.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('offered')}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${
+                activeTab === 'offered' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'text-slate-400'
+              }`}
+            >
+              Rides You Offered ({offeredRides.length})
+            </button>
+          </div>
+
+          {activeTab === 'joined' && (
+            <div>
+              {joinedRides.length === 0 ? (
+                <div className="glass-card p-12 text-center rounded-3xl border border-slate-800 space-y-4">
+                  <div className="text-4xl">🎫</div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">No Upcoming Joined Rides</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                      You haven't joined any rides yet. Browse active campus offers to reserve your seat!
+                    </p>
+                  </div>
+                  <button onClick={() => setCurrentView('browse')} className="px-6 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs">
+                    Browse & Join Rides Now
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {joinedRides.map(ride => (
+                    <div key={ride.id} className="glass-card p-6 rounded-2xl border border-emerald-500/40 relative flex flex-col justify-between space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                            ✅ Seat Confirmed
+                          </span>
+                          <span className="text-xs text-slate-400">{ride.vehicle_type}</span>
+                        </div>
+
+                        <div className="space-y-2 mb-4">
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase font-semibold">Pickup Spot</p>
+                            <p className="text-base font-bold text-white">{ride.pickup}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase font-semibold">Destination</p>
+                            <p className="text-base font-bold text-white">{ride.destination}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between text-xs text-slate-300 p-2.5 rounded-xl bg-slate-900 border border-slate-800 mb-4">
+                          <span>📅 {ride.date}</span>
+                          <span>⏰ {ride.time}</span>
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 mb-4">
+                          <div className="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>Host</span>
+                            <span className="font-semibold text-slate-200">{ride.creator_name || 'Campus Student'}</span>
+                          </div>
+                          <div className="flex justify-between items-baseline">
+                            <span className="text-xs text-emerald-400 font-bold">Your Split Share</span>
+                            <span className="text-xl font-extrabold text-emerald-300">₹{ride.fare_per_person}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => onTrackClick(ride)}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg hover:brightness-110 flex items-center justify-center gap-2"
+                        >
+                          📍 Track Live Driver & Route Map
+                        </button>
+
+                        <button
+                          onClick={() => onLeaveRide(ride.id)}
+                          className="w-full py-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/30 font-bold text-xs hover:bg-rose-500/20"
+                        >
+                          Cancel Booking / Leave Ride
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'offered' && (
+            <div>
+              {offeredRides.length === 0 ? (
+                <div className="glass-card p-12 text-center rounded-3xl border border-slate-800 space-y-4">
+                  <div className="text-4xl">🚗</div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">No Offered Rides</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                      You haven't posted any rides yet. Offer an Auto or Cab ride from campus and let others join!
+                    </p>
+                  </div>
+                  <button onClick={() => setCurrentView('create')} className="px-6 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs">
+                    + Offer a Ride Now
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {offeredRides.map(ride => (
+                    <div key={ride.id} className="glass-card p-6 rounded-2xl border border-sky-500/40 flex flex-col justify-between space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                            👑 Host • Offered by You
+                          </span>
+                          <span className="text-xs text-slate-400">{ride.vehicle_type}</span>
+                        </div>
+
+                        <div className="space-y-2 mb-4">
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase font-semibold">Pickup</p>
+                            <p className="text-base font-bold text-white">{ride.pickup}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase font-semibold">Destination</p>
+                            <p className="text-base font-bold text-white">{ride.destination}</p>
+                          </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-4 space-y-1 text-xs">
+                          <div className="flex justify-between text-slate-300">
+                            <span>Departure</span>
+                            <span className="font-semibold">{ride.date} @ {ride.time}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-300">
+                            <span>Total Fare</span>
+                            <span className="font-semibold">₹{ride.total_fare}</span>
+                          </div>
+                          <div className="flex justify-between text-emerald-400 font-bold">
+                            <span>Seats Available</span>
+                            <span>{ride.available_seats} left</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => onTrackClick(ride)}
+                        className="w-full py-3 rounded-xl bg-sky-500 text-slate-950 font-extrabold text-xs hover:brightness-110"
+                      >
+                        📍 View Route Map & Driver Location
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 5. STUDENT PROFILE VIEW
+    function ProfileView({ user, onUpdateProfile, showToast }) {
+      const [form, setForm] = useState({
+        name: user ? user.name : "Aarav Sharma",
+        rollNo: user ? (user.rollNo || "STU-2026-8842") : "STU-2026-8842",
+        email: user ? user.email : "aarav.sharma@college.edu",
+        phone: user ? (user.phone || "+91 98230 44921") : "+91 98230 44921",
+        department: user ? (user.department || "Computer Science & Eng. (4th Year)") : "Computer Science & Eng. (4th Year)",
+        preferredGate: user ? (user.preferredGate || "College Gate 1 (Main Gate)") : "College Gate 1 (Main Gate)",
+        emergencyContactName: user ? (user.emergencyContactName || "Rajesh Sharma (Father)") : "Rajesh Sharma (Father)",
+        emergencyContactPhone: user ? (user.emergencyContactPhone || "+91 94221 00982") : "+91 94221 00982",
+        autoCabPref: user ? (user.autoCabPref || "Any") : "Any",
+        whatsappNotify: user ? (user.whatsappNotify !== undefined ? user.whatsappNotify : true) : true,
+        sosBroadcasting: user ? (user.sosBroadcasting !== undefined ? user.sosBroadcasting : true) : true,
+        fareSplitAlerts: user ? (user.fareSplitAlerts !== undefined ? user.fareSplitAlerts : true) : true,
+      });
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onUpdateProfile(form);
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-8">
+          {/* Header Banner */}
+          <div className="glass-card p-6 sm:p-8 rounded-3xl border border-emerald-500/40 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-5">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-500 to-sky-500 p-1 flex-shrink-0 shadow-lg">
+                <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center font-bold text-3xl text-emerald-400">
+                  👨‍🎓
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white">{form.name}</h1>
+                  <span className="px-2.5 py-0.5 text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
+                    ✅ Verified Student
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-400 font-semibold">{form.department}</p>
+                <p className="text-xs text-slate-400">Roll No: <span className="font-mono text-slate-200">{form.rollNo}</span> • Email: <span className="text-slate-200">{form.email}</span></p>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800 text-center text-xs">
+              <p className="text-[10px] text-slate-400 uppercase font-semibold">Campus Gate</p>
+              <p className="font-bold text-sky-400 mt-0.5">{form.preferredGate}</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-8">
+            
+            {/* Student Personal Details Form */}
+            <div className="glass-card p-6 sm:p-8 rounded-3xl space-y-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                👤 Student Personal Details
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({...form, name: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Student Roll / ID Number *</label>
+                  <input
+                    type="text"
+                    value={form.rollNo}
+                    onChange={e => setForm({...form, rollNo: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">College Email Address *</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={e => setForm({...form, email: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Mobile Phone Number *</label>
+                  <input
+                    type="text"
+                    value={form.phone}
+                    onChange={e => setForm({...form, phone: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Department & Academic Year</label>
+                  <input
+                    type="text"
+                    value={form.department}
+                    onChange={e => setForm({...form, department: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Preferred Campus Gate Spot</label>
+                  <select
+                    value={form.preferredGate}
+                    onChange={e => setForm({...form, preferredGate: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="College Gate 1 (Main Gate)">College Gate 1 (Main Gate)</option>
+                    <option value="College Gate 2 (Hostel Gate)">College Gate 2 (Hostel Gate)</option>
+                    <option value="College Gate 3 (Sports Complex)">College Gate 3 (Sports Complex)</option>
+                    <option value="Library / IT Park Stop">Library / IT Park Stop</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Emergency & Guardian Contact Details */}
+            <div className="glass-card p-6 sm:p-8 rounded-3xl space-y-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                🚨 Emergency & Guardian Contact Details
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Emergency Contact Name</label>
+                  <input
+                    type="text"
+                    value={form.emergencyContactName}
+                    onChange={e => setForm({...form, emergencyContactName: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Emergency Contact Phone Number</label>
+                  <input
+                    type="text"
+                    value={form.emergencyContactPhone}
+                    onChange={e => setForm({...form, emergencyContactPhone: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Preferences */}
+            <div className="glass-card p-6 sm:p-8 rounded-3xl space-y-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                ⚙️ Pooling Preferences & Safety Controls
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Vehicle Preference</label>
+                  <select
+                    value={form.autoCabPref}
+                    onChange={e => setForm({...form, autoCabPref: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="Any">Any Vehicle (Auto Rickshaw or Cab)</option>
+                    <option value="Auto Only">Auto Rickshaw Only</option>
+                    <option value="Cab Only">Cab / Taxi Only</option>
+                  </select>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="text-xs font-bold text-white">WhatsApp Live Trip Updates</p>
+                      <p className="text-[11px] text-slate-400">Receive instant WhatsApp alerts when host driver arrives</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={form.whatsappNotify}
+                      onChange={e => setForm({...form, whatsappNotify: e.target.checked})}
+                      className="w-5 h-5 rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="text-xs font-bold text-white">Instant Emergency SOS Broadcasting</p>
+                      <p className="text-[11px] text-slate-400">Allow 1-tap SOS to share live trip location with campus security</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={form.sosBroadcasting}
+                      onChange={e => setForm({...form, sosBroadcasting: e.target.checked})}
+                      className="w-5 h-5 rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="text-xs font-bold text-white">Instant Fare Split Calculations</p>
+                      <p className="text-[11px] text-slate-400">Auto recalculate fare per person as riders join</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={form.fareSplitAlerts}
+                      onChange={e => setForm({...form, fareSplitAlerts: e.target.checked})}
+                      className="w-5 h-5 rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-base shadow-emerald-glow hover:brightness-110"
+            >
+              Save Profile
+            </button>
+          </form>
+
+        </div>
+      );
+    }
+
+    // 6. Create View
+    function CreateView({ onCreate, showToast, currentUser }) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const [form, setForm] = useState({
+        pickup: '',
+        destination: '',
+        date: todayStr,
+        time: '17:00',
+        vehicle_type: 'Auto',
+        total_fare: '180',
+        available_seats: '2',
+        notes: '',
+        creator_name: currentUser ? currentUser.name : ''
+      });
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!form.pickup.trim() || !form.destination.trim()) {
+          showToast('Pickup and Destination are required', 'error');
+          return;
+        }
+        if (parseFloat(form.total_fare) <= 0) {
+          showToast('Total fare must be greater than 0', 'error');
+          return;
+        }
+        if (parseInt(form.available_seats) <= 0) {
+          showToast('Available seats must be greater than 0', 'error');
+          return;
+        }
+
+        await onCreate({
+          pickup: form.pickup.trim(),
+          destination: form.destination.trim(),
+          date: form.date,
+          time: form.time,
+          vehicle_type: form.vehicle_type,
+          total_fare: parseFloat(form.total_fare),
+          available_seats: parseInt(form.available_seats),
+          notes: form.notes.trim(),
+          creator_name: form.creator_name.trim() || (currentUser ? currentUser.name : 'Student Host')
+        });
+      };
+
+      const fareVal = parseFloat(form.total_fare) || 0;
+      const seatsVal = parseInt(form.available_seats) || 1;
+      const perPersonIfFull = Math.round(fareVal / (seatsVal + 1));
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div>
+            <h1 className="text-3xl font-extrabold text-white">Offer a <span className="text-gradient-emerald">Campus Ride</span></h1>
+            <p className="text-xs text-slate-400 mt-1">Post your Auto or Cab ride details so fellow students can join and split the fare.</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <form onSubmit={handleSubmit} className="lg:col-span-2 glass-card p-6 sm:p-8 rounded-3xl space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Pickup Location *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. College Main Gate"
+                  value={form.pickup}
+                  onChange={e => setForm({...form, pickup: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Destination Location *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sitabuldi / Airport"
+                  value={form.destination}
+                  onChange={e => setForm({...form, destination: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Date *</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={e => setForm({...form, date: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Time *</label>
+                  <input
+                    type="time"
+                    value={form.time}
+                    onChange={e => setForm({...form, time: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Vehicle Type</label>
+                  <select
+                    value={form.vehicle_type}
+                    onChange={e => setForm({...form, vehicle_type: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                  >
+                    <option value="Auto">Auto Rickshaw</option>
+                    <option value="Cab">Cab / Taxi</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Total Fare (₹) *</label>
+                  <input
+                    type="number"
+                    value={form.total_fare}
+                    onChange={e => setForm({...form, total_fare: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Available Seats *</label>
+                <input
+                  type="number"
+                  value={form.available_seats}
+                  onChange={e => setForm({...form, available_seats: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Your Name / Host (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Aarav Sharma"
+                  value={form.creator_name}
+                  onChange={e => setForm({...form, creator_name: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-base shadow-emerald-glow"
+              >
+                Publish Ride Offer
+              </button>
+            </form>
+
+            <div className="glass-card p-6 rounded-3xl space-y-4">
+              <h3 className="text-base font-bold text-white">Live Fare Split Preview</h3>
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                <div className="flex justify-between text-slate-400">
+                  <span>Total Fare</span>
+                  <span className="font-bold text-white">₹{fareVal}</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Total Capacity</span>
+                  <span className="font-bold text-sky-400">{seatsVal + 1} Riders</span>
+                </div>
+                <div className="pt-2 border-t border-slate-800 flex justify-between">
+                  <span className="font-bold text-emerald-400">Share if Full</span>
+                  <span className="text-xl font-extrabold text-emerald-300">₹{perPersonIfFull} / person</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Reusable Ride Card Component
+    function RideCard({ ride, onJoinClick, onTrackClick, isJoined }) {
+      const isFull = ride.available_seats <= 0;
+      const currentPass = ride.joined_passengers || 1;
+      const perPersonNow = Math.round(ride.total_fare / currentPass);
+
+      return (
+        <div className={`glass-card p-6 rounded-2xl border transition-all flex flex-col justify-between ${
+          isJoined ? 'border-emerald-500/60 bg-emerald-950/20' :
+          isFull ? 'opacity-85 border-slate-800' : 'hover:border-emerald-500/40 hover:shadow-xl'
+        }`}>
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className={`px-2.5 py-0.5 rounded-lg text-xs font-bold ${
+                ride.vehicle_type === 'Auto' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+              }`}>
+                {ride.vehicle_type}
+              </span>
+
+              {isJoined ? (
+                <span className="px-2.5 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  ✅ Joined by You
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  ✨ {ride.match_score || 90}% Match
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase font-semibold">Pickup</p>
+                <p className="text-base font-bold text-white">{ride.pickup}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase font-semibold">Destination</p>
+                <p className="text-base font-bold text-white">{ride.destination}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-between text-xs text-slate-400 p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 mb-4">
+              <span>📅 {ride.date}</span>
+              <span>⏰ {ride.time}</span>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-4 flex justify-between items-baseline">
+              <span className="text-xs text-emerald-400 font-semibold">Current Share ({currentPass} rider)</span>
+              <span className="text-xl font-extrabold text-white">₹{perPersonNow} <span className="text-[10px] text-slate-400 font-normal">/ person</span></span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {isJoined ? (
+              <button
+                onClick={() => onTrackClick(ride)}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg hover:brightness-110"
+              >
+                📍 Track Live Driver & Route Map
+              </button>
+            ) : isFull ? (
+              <div className="w-full py-3 rounded-xl bg-slate-800 text-slate-400 text-center font-bold text-sm">
+                No Seats Available
+              </div>
+            ) : (
+              <button
+                onClick={() => onJoinClick(ride)}
+                className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-emerald-glow hover:brightness-110"
+              >
+                Join Ride ({ride.available_seats} seat{ride.available_seats > 1 ? 's' : ''} left)
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Join Modal
+    function JoinModal({ ride, onClose, onConfirm, currentUser }) {
+      const [name, setName] = useState(currentUser ? currentUser.name : '');
+      const currentPassengers = ride.joined_passengers || 1;
+      const newPassengers = currentPassengers + 1;
+      const newShare = Math.round(ride.total_fare / newPassengers);
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="glass-card max-w-md w-full rounded-3xl p-6 border border-emerald-500/30 space-y-4">
+            <h3 className="text-xl font-extrabold text-white">Confirm Ride Join</h3>
+            <p className="text-xs text-slate-400">Ride {ride.pickup} ➔ {ride.destination}</p>
+
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-2">
+              <div className="flex justify-between text-xs text-emerald-300 font-semibold">
+                <span>Updated Fare Split ({newPassengers} riders)</span>
+                <span className="text-lg font-bold text-emerald-400">₹{newShare} / person</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Your Name / Student ID</label>
+              <input
+                type="text"
+                placeholder="e.g. Rahul Verma"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 font-semibold text-sm">
+                Cancel
+              </button>
+              <button onClick={() => onConfirm(ride.id, name || 'Student Companion')} className="flex-1 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-sm">
+                Confirm Join
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Live Map Modal
+    function LiveMapModal({ ride, onClose, onSafetyClick }) {
+      const mapContainerRef = useRef(null);
+      const [driverStatus, setDriverStatus] = useState("Driver En Route to Pickup Point");
+      const [distanceLeft, setDistanceLeft] = useState("1.2 km");
+      const [etaMins, setEtaMins] = useState(3);
+
+      const isAuto = ride.vehicle_type === 'Auto';
+      const driverName = isAuto ? "Ramesh Kumar (Auto Pilot)" : "Suresh Rao (Cab Express)";
+      const vehicleNum = isAuto ? "MH-31-AZ-8842" : "MH-31-EV-1029";
+
+      useEffect(() => {
+        if (!window.L) return;
+
+        const pickupCoords = getCoordsForLocation(ride.pickup, 21.1245, 79.0520);
+        const destCoords = getCoordsForLocation(ride.destination, 21.1458, 79.0882);
+
+        const driverStartLat = pickupCoords[0] - 0.008;
+        const driverStartLng = pickupCoords[1] - 0.008;
+
+        const map = window.L.map(mapContainerRef.current).setView(pickupCoords, 13);
+
+        window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        window.L.marker(pickupCoords).addTo(map).bindPopup(`<b>🏫 Pickup Point</b><br/>${ride.pickup}`).openPopup();
+        window.L.marker(destCoords).addTo(map).bindPopup(`<b>🏁 Destination</b><br/>${ride.destination}`);
+
+        window.L.polyline([pickupCoords, destCoords], { color: '#10b981', weight: 4, dashArray: '8, 8' }).addTo(map);
+
+        const driverIcon = window.L.divIcon({
+          className: 'custom-driver-icon',
+          html: `<div style="background:#0284c7; color:#fff; border:2px solid #fff; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 0 15px #0284c7;">${isAuto ? '🛺' : '🚕'}</div>`,
+          iconSize: [36, 36],
+          iconAnchor: [18, 18]
+        });
+
+        const driverMarker = window.L.marker([driverStartLat, driverStartLng], { icon: driverIcon }).addTo(map);
+
+        map.fitBounds(window.L.latLngBounds([pickupCoords, destCoords, [driverStartLat, driverStartLng]]), { padding: [40, 40] });
+
+        let step = 0;
+        const totalSteps = 40;
+        const interval = setInterval(() => {
+          step++;
+          const progress = step / totalSteps;
+          const currentLat = driverStartLat + (pickupCoords[0] - driverStartLat) * progress;
+          const currentLng = driverStartLng + (pickupCoords[1] - driverStartLng) * progress;
+
+          driverMarker.setLatLng([currentLat, currentLng]);
+
+          const remKm = (1.2 * (1 - progress)).toFixed(1);
+          setDistanceLeft(`${Math.max(0.1, remKm)} km`);
+
+          if (step < 15) {
+            setDriverStatus("Driver En Route to Pickup Point");
+            setEtaMins(3);
+          } else if (step < 35) {
+            setDriverStatus("Driver Arriving at Campus Pickup Gate");
+            setEtaMins(1);
+          } else {
+            setDriverStatus("Driver Arrived at Pickup Point!");
+            setEtaMins(0);
+            clearInterval(interval);
+          }
+        }, 800);
+
+        return () => {
+          clearInterval(interval);
+          map.remove();
+        };
+      }, [ride]);
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="glass-card max-w-2xl w-full rounded-3xl p-6 border border-emerald-500/40 space-y-5 relative">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  📍 Live GPS Route & Driver Tracking
+                </span>
+                <h3 className="text-xl font-extrabold text-white mt-1">{ride.pickup} ➔ {ride.destination}</h3>
+              </div>
+              <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div id="map" ref={mapContainerRef}></div>
+
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-center">
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <p className="text-[10px] text-slate-400 uppercase font-semibold">Driver Status</p>
+                <p className="text-sm font-bold text-emerald-400 mt-0.5">{driverStatus}</p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <p className="text-[10px] text-slate-400 uppercase font-semibold">Distance to Pickup</p>
+                <p className="text-sm font-bold text-sky-400 mt-0.5">{distanceLeft}</p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <p className="text-[10px] text-slate-400 uppercase font-semibold">Estimated Arrival</p>
+                <p className="text-sm font-bold text-amber-400 mt-0.5">{etaMins > 0 ? `${etaMins} Mins` : 'ARRIVED'}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-300 font-bold flex items-center justify-center text-lg">
+                  {isAuto ? '🛺' : '🚕'}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">{driverName}</p>
+                  <p className="text-xs text-slate-400">Vehicle No: <span className="text-emerald-400 font-mono font-bold">{vehicleNum}</span> • ⭐ 4.9</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button onClick={() => alert(`Calling driver ${driverName} at +91 98230 44921...`)} className="px-3.5 py-2 rounded-xl bg-emerald-500 text-slate-950 font-extrabold text-xs">
+                  📞 Call Driver
+                </button>
+                <button onClick={onSafetyClick} className="px-3.5 py-2 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold text-xs">
+                  🚨 Emergency SOS
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    // Safety Center Modal
+    function SafetyCenterModal({ onClose, showToast }) {
+      const [ticketCategory, setTicketCategory] = useState("Safety Concern");
+      const [ticketMessage, setTicketMessage] = useState("");
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      const handleSOS = (contactName, phoneNum) => {
+        alert(`🚨 EMERGENCY ALERT TRIGGERED!\nConnecting to ${contactName} (${phoneNum})...\nSharing your live GPS location & RideMate details.`);
+      };
+
+      const handleShareLiveTrip = () => {
+        const text = encodeURIComponent("🚨 Live Ride Share: I am currently riding in RideMate Auto #MH31AZ8842 from College Gate to Sitabuldi. Live Location: http://127.0.0.1:8050");
+        window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+      };
+
+      const handleTicketSubmit = (e) => {
+        e.preventDefault();
+        if (!ticketMessage.trim()) {
+          showToast("Please enter a description for support", "error");
+          return;
+        }
+        setIsSubmitting(true);
+        setTimeout(() => {
+          setIsSubmitting(false);
+          setTicketMessage("");
+          showToast(`Customer Care Ticket Created (#RM-${Math.floor(1000 + Math.random() * 9000)})! Support team will contact you.`, "success");
+        }, 600);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="glass-card max-w-2xl w-full rounded-3xl p-6 sm:p-8 border border-rose-500/40 space-y-6 relative max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center text-2xl font-bold">
+                  🚨
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-white">Campus Safety & Customer Care</h3>
+                  <p className="text-xs text-slate-400">24/7 Emergency SOS, Helplines & Customer Support</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-950/60 via-slate-900 to-rose-950/60 border border-rose-500/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-rose-300 uppercase tracking-wider">
+                  ⚠️ 24/7 Campus Emergency Response
+                </span>
+                <span className="text-[10px] font-bold bg-rose-500 text-slate-950 px-2 py-0.5 rounded-full">
+                  INSTANT SOS
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                In case of immediate danger, tap SOS to instantly alert Campus Security and broadcast your live trip coordinates.
+              </p>
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button 
+                  onClick={() => handleSOS('Campus Security Helpline', '+91 712 280 1100')}
+                  className="flex-1 py-3 px-4 rounded-xl bg-rose-600 text-white font-extrabold text-xs shadow-lg hover:bg-rose-500 flex items-center justify-center gap-2"
+                >
+                  🚨 Call Campus Security (+91 712 280 1100)
+                </button>
+
+                <button 
+                  onClick={handleShareLiveTrip}
+                  className="py-3 px-4 rounded-xl bg-emerald-500 text-slate-950 font-extrabold text-xs hover:brightness-110 flex items-center justify-center gap-1.5"
+                >
+                  📲 Share Live Trip Link
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">Emergency Helplines</h4>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center">
+                  <div>
+                    <p className="font-bold text-white">🏫 Campus Security Control Room</p>
+                    <p className="text-slate-400 text-[11px]">+91 712 280 1100 (24/7 Gate 1)</p>
+                  </div>
+                  <button onClick={() => handleSOS('Campus Security', '+91 712 280 1100')} className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold hover:bg-emerald-500/30">
+                    Call
+                  </button>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center">
+                  <div>
+                    <p className="font-bold text-white">👮 Police Emergency Helpline</p>
+                    <p className="text-slate-400 text-[11px]">Dial 112 / 100 (National Response)</p>
+                  </div>
+                  <button onClick={() => handleSOS('Police Emergency', '112')} className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold hover:bg-emerald-500/30">
+                    Call
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+              <div>
+                <h4 className="text-sm font-bold text-white">🎧 24/7 RideMate Customer Care Support</h4>
+                <p className="text-xs text-slate-400 mt-0.5">Need help with a fare discrepancy, lost item, or driver feedback?</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <p className="text-[10px] text-slate-400 uppercase font-semibold">Toll-Free Customer Care</p>
+                  <p className="text-sm font-bold text-sky-400 mt-0.5">📞 1800-419-7433</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <p className="text-[10px] text-slate-400 uppercase font-semibold">Support Email Desk</p>
+                  <p className="text-sm font-bold text-sky-400 mt-0.5">✉️ support@ridemate.college.edu</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // LOGIN & REGISTER MODAL COMPONENT
+    function LoginModal({ onClose, onLoginSuccess, showToast }) {
+      const [isLoginTab, setIsLoginTab] = useState(true);
+      const [emailOrPhone, setEmailOrPhone] = useState('');
+      const [password, setPassword] = useState('');
+      const [fullName, setFullName] = useState('');
+      const [department, setDepartment] = useState('');
+      const [rememberMe, setRememberMe] = useState(true);
+
+      const handleDemoLogin = (demoName, demoEmail) => {
+        const user = {
+          name: demoName,
+          email: demoEmail,
+          department: "Computer Science (Final Year)",
+          rollNo: "STU-2026-8842",
+          phone: "+91 98230 44921",
+          preferredGate: "College Gate 1 (Main Gate)"
+        };
+        onLoginSuccess(user);
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!emailOrPhone.trim() || !password.trim()) {
+          showToast('Please enter your Email/Mobile number and Password', 'error');
+          return;
+        }
+
+        const nameToUse = isLoginTab ? (emailOrPhone.includes('@') ? emailOrPhone.split('@')[0].toUpperCase() : 'Student Commuter') : (fullName.trim() || 'Student Commuter');
+        
+        const user = {
+          name: nameToUse,
+          email: emailOrPhone.trim(),
+          department: department.trim() || 'Engineering Dept',
+          rollNo: "STU-" + Math.floor(1000 + Math.random() * 9000),
+          phone: "+91 98230 44921",
+          preferredGate: "College Gate 1 (Main Gate)"
+        };
+
+        onLoginSuccess(user);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="glass-card max-w-md w-full rounded-3xl p-6 sm:p-8 border border-emerald-500/40 space-y-6 relative">
+            <button onClick={onClose} className="absolute top-5 right-5 p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+              ✕
+            </button>
+
+            <div className="text-center space-y-2 pt-2">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-sky-500 p-0.5 mx-auto">
+                <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center text-xl">
+                  🔑
+                </div>
+              </div>
+              <h3 className="text-2xl font-extrabold text-white">{isLoginTab ? 'Student Login' : 'Create Account'}</h3>
+              <p className="text-xs text-slate-400">Access college auto & cab pooling dashboard</p>
+            </div>
+
+            <div className="flex rounded-xl bg-slate-900 p-1 border border-slate-800">
+              <button
+                onClick={() => setIsLoginTab(true)}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  isLoginTab ? 'bg-emerald-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => setIsLoginTab(false)}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  !isLoginTab ? 'bg-emerald-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Quick Demo Login</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDemoLogin('Aarav Sharma', 'aarav.sharma@college.edu')}
+                  className="py-2 px-3 rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/20"
+                >
+                  🎓 Aarav (Student)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDemoLogin('Priya Patel', 'priya.patel@college.edu')}
+                  className="py-2 px-3 rounded-xl bg-sky-500/10 text-sky-300 border border-sky-500/30 text-xs font-bold hover:bg-sky-500/20"
+                >
+                  🛺 Priya (Host)
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {!isLoginTab && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Full Student Name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Rahul Verma"
+                    value={fullName}
+                    onChange={e => setFullName(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    required
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Email ID or Mobile Number *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. aarav.sharma@college.edu or 9823044921"
+                  value={emailOrPhone}
+                  onChange={e => setEmailOrPhone(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  required
+                />
+              </div>
+
+              {!isLoginTab && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Department / Branch</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Computer Science (Final Year)"
+                    value={department}
+                    onChange={e => setDepartment(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              )}
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs font-semibold text-slate-300 uppercase">Password *</label>
+                  {isLoginTab && (
+                    <button type="button" onClick={() => showToast('Demo Mode: Password reset link sent to email!', 'info')} className="text-[11px] text-emerald-400 hover:underline">
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  required
+                />
+              </div>
+
+              {isLoginTab && (
+                <div className="flex items-center gap-2 text-xs text-slate-400 pt-1">
+                  <input
+                    type="checkbox"
+                    id="remember"
+                    checked={rememberMe}
+                    onChange={e => setRememberMe(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-800 text-emerald-500 focus:ring-0 cursor-pointer"
+                  />
+                  <label htmlFor="remember" className="cursor-pointer">Remember my login session</label>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-sm shadow-emerald-glow hover:brightness-110"
+              >
+                {isLoginTab ? 'Sign In to RideMate' : 'Register Student Account'}
+              </button>
+            </form>
+
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
